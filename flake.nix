@@ -18,6 +18,7 @@
                 rust-analyzer
                 postgresql
                 pkg-config
+                sqlx-cli
             ];
         };
     };
