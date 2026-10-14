@@ -4,6 +4,10 @@ use axum::{Router, routing::get, routing::post};
 use services::auth::{login, logout, me};
 use sqlx::postgres::PgPoolOptions;
 use std::env;
+use std::net::SocketAddr;
+use tower_governor::{
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor,
+};
 
 #[tokio::main]
 async fn main() {
@@ -15,17 +19,21 @@ async fn main() {
         .await
         .expect("Connection Failed");
 
-    let result: i32 = sqlx::query_scalar("SELECT 1")
-        .fetch_one(&pool)
-        .await
-        .expect("query fetcgh failed");
-
-    println!("database test result: {result}");
+    let governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(PeerIpKeyExtractor)
+        .per_second(12)
+        .burst_size(5)
+        .finish()
+        .expect("Ey! I need a valid config");
 
     let app: Router<_> = Router::new()
         .route("/health", get(health))
         .route("/auth/register", post(register))
-        .route("/auth/login", axum::routing::post(services::auth::login))
+        .route(
+            "/auth/login",
+            axum::routing::post(login)
+                .layer(GovernorLayer::new(std::sync::Arc::new(governor_conf))),
+        )
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
         .with_state::<()>(pool);
@@ -34,7 +42,12 @@ async fn main() {
         .await
         .expect("Failed to get the port;");
 
-    axum::serve(listener, app).await.expect("Servering Failed");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Servering Failed");
 }
 
 async fn health() -> &'static str {

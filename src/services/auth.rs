@@ -25,9 +25,20 @@ pub async fn register(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let id = create_user(&pool, &payload.email, &payload.password)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let id = create_user(
+        &pool,
+        &payload.email.trim().to_lowercase(),
+        &payload.password,
+    )
+    .await
+    .map_err(|err| {
+        if let sqlx::Error::Database(db_err) = &err {
+            if db_err.is_unique_violation() {
+                return StatusCode::CONFLICT;
+            }
+        }
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok((StatusCode::CREATED, Json(RegisterResponse { id })))
 }
@@ -52,7 +63,7 @@ pub async fn login(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let users = find_usr_in_email(&pool, payload.email.trim())
+    let users = find_usr_in_email(&pool, &payload.email.trim().to_lowercase())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

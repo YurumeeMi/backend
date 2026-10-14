@@ -1,5 +1,5 @@
-use sha2::{Digest, Sha256, digest};
-use sqlx::{PgPool, pool::maybe::MaybePoolConnection::PoolConnection};
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 pub async fn create_session(pool: &PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {

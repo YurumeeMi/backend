@@ -1,4 +1,4 @@
-use sqlx::{PgPool, pool::maybe::MaybePoolConnection::PoolConnection};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::services::password::hash_password;
