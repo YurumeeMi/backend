@@ -1,22 +1,15 @@
-
 use sha2::{Digest, Sha256, digest};
 use sqlx::{PgPool, pool::maybe::MaybePoolConnection::PoolConnection};
 use uuid::Uuid;
 
-pub async fn create_session(
-    pool: &PgPool,
-    user_id: Uuid,
-) -> Result<String, sqlx::Error> {
-    let token = format!(
-        "{}{}",
-        Uuid::new_v4().simple(),
-        Uuid::new_v4().simple()
-    );
+pub async fn create_session(pool: &PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {
+    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
 
     let digest = Sha256::digest(token.as_bytes());
-    let token_hash = digest.iter()
-    .map(|byte| format!("{byte:02x}"))
-    .collect::<String>();
+    let token_hash = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     sqlx::query(
         "INSERT INTO sessions (id, user_id, token_hash, expires_at)
          VALUES ($1, $2, $3, NOW() + INTERVAL '7 days')",
@@ -29,16 +22,12 @@ pub async fn create_session(
 
     Ok(token)
 }
-pub async fn find_session_user (
-    pool: &PgPool,
-    token: &str,
-
- ) -> Result<Option<Uuid>, sqlx::Error> {
+pub async fn find_session_user(pool: &PgPool, token: &str) -> Result<Option<Uuid>, sqlx::Error> {
     let digest = Sha256::digest(token.as_bytes());
     let token_hash = digest
-    .iter()
-    .map(|byte| format!("{byte:02x}"))
-    .collect::<String>();
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
 
     sqlx::query_scalar::<_, Uuid>(
         "SELECT user_id
@@ -50,20 +39,17 @@ pub async fn find_session_user (
     .fetch_optional(pool)
     .await
 }
-pub async fn delete_session(
-    pool: &PgPool,
-    token: &str,
-) -> Result<(), sqlx::Error> {
+pub async fn delete_session(pool: &PgPool, token: &str) -> Result<(), sqlx::Error> {
     let digest = Sha256::digest(token.as_bytes());
     let token_hash = digest
-    .iter()
-    .map(|byte| format!("{byte:02x}"))
-    .collect::<String>();
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
 
     sqlx::query("DELETE FROM sessions WHERE  token_hash = $1")
-    .bind(token_hash)
-    .execute(pool)
-    .await?;
+        .bind(token_hash)
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
