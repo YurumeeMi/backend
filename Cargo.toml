@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 argon2 = { version = "0.6.0", features = ["rand_core"] }
 axum = "0.8.9"
+rand = "0.10.3"
 serde = "1.0.229"
+sha2 = "0.11.1"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "uuid", "chrono", "migrate", "macros"] }
 tokio = { version = "1.53.2", features = ["full"] }
 uuid = { version = "1.28.0", features = ["serde", "v4"] }

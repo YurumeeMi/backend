@@ -3,6 +3,7 @@ use crate::services::auth::register;
 use axum::{Router, routing::get, routing::post};
 use sqlx::postgres::PgPoolOptions;
 use std::env;
+use services::auth::{login, logout, me};
 
 #[tokio::main]
 async fn main() {
@@ -24,6 +25,9 @@ async fn main() {
     let app: Router<_> = Router::new()
         .route("/health", get(health))
         .route("/auth/register", post(register))
+        .route("/auth/login", axum::routing::post(services::auth::login),)
+        .route("/auth/me", get(me))
+        .route("/auth/logout", post(logout))
         .with_state::<()>(pool);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")

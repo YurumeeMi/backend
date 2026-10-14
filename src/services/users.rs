@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+use sqlx::{PgPool, pool::maybe::MaybePoolConnection::PoolConnection};
 use uuid::Uuid;
 
 use crate::services::password::hash_password;
@@ -21,4 +21,16 @@ pub async fn create_user(pool: &PgPool, email: &str, password: &str) -> Result<U
     .await?;
 
     Ok(created_id)
+}
+pub async fn find_usr_in_email(
+    pool: &PgPool,
+    email: &str
+) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+    sqlx::query_as::<_,(Uuid, String)>(
+        "SELECT id, password_hash
+              FROM users WHERE email = $1"
+    )
+    .bind(email)
+    .fetch_optional(pool)
+    .await
 }
