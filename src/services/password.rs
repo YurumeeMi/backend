@@ -16,3 +16,13 @@ pub fn password_verify(password: &str, stored_hash: &str) -> Result<(), String> 
         .verify_password(password.as_bytes(), &parsed_hash)
         .map_err(|err| err.to_string())
 }
+
+#[test]
+fn benchmark_password_hash() {
+    use std::time::Instant;
+
+    let start = Instant::now();
+    let _hash = hash_password("benchmark-password").unwrap();
+
+    println!("Hash Time: {:?}", start.elapsed());
+}

@@ -1,5 +1,5 @@
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, pool::maybe::MaybePoolConnection::PoolConnection};
 use uuid::Uuid;
 
 pub async fn create_session(pool: &PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {
@@ -48,6 +48,23 @@ pub async fn delete_session(pool: &PgPool, token: &str) -> Result<(), sqlx::Erro
 
     sqlx::query("DELETE FROM sessions WHERE  token_hash = $1")
         .bind(token_hash)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn delete_expired_session(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM sessions WHERE expires_at <= NOW()")
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected())
+}
+
+pub async fn delete_user_session(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM sessions WHERE user_id =$1")
+        .bind(user_id)
         .execute(pool)
         .await?;
 

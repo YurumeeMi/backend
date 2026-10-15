@@ -1,7 +1,12 @@
 mod services;
 use crate::services::auth::register;
-use axum::{Router, routing::get, routing::post};
-use services::auth::{login, logout, me};
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    routing::{get, post},
+};
+use services::auth::{change_pass, login, logout, me};
+use services::password_reset::{forgot_password, rst_pass_hand};
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
@@ -26,16 +31,30 @@ async fn main() {
         .finish()
         .expect("Ey! I need a valid config");
 
+    let reg_governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(PeerIpKeyExtractor)
+        .per_second(60)
+        .burst_size(3)
+        .finish()
+        .expect("Ey! I need a valid config");
+
     let app: Router<_> = Router::new()
         .route("/health", get(health))
-        .route("/auth/register", post(register))
+        .route(
+            "/auth/register",
+            post(register).layer(GovernorLayer::new(std::sync::Arc::new(reg_governor_conf))),
+        )
         .route(
             "/auth/login",
             axum::routing::post(login)
                 .layer(GovernorLayer::new(std::sync::Arc::new(governor_conf))),
         )
         .route("/auth/me", get(me))
+        .route("/auth/change-pass", post(change_pass))
         .route("/auth/logout", post(logout))
+        .route("/auth/forgot-pass", post(forgot_password))
+        .route("/auth/reset_password", post(rst_pass_hand))
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state::<()>(pool);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")

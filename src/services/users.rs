@@ -22,6 +22,7 @@ pub async fn create_user(pool: &PgPool, email: &str, password: &str) -> Result<U
 
     Ok(created_id)
 }
+
 pub async fn find_usr_in_email(
     pool: &PgPool,
     email: &str,
@@ -33,4 +34,28 @@ pub async fn find_usr_in_email(
     .bind(email)
     .fetch_optional(pool)
     .await
+}
+
+pub async fn update_password_hash(
+    pool: &PgPool,
+    user_id: Uuid,
+    password_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(password_hash)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn find_password_hash_by_id(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>("SELECT password_hash FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
 }

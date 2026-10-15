@@ -1,9 +1,25 @@
-use crate::services::password::password_verify;
-use crate::services::users::{create_user, find_usr_in_email};
+use crate::services::password::{hash_password, password_verify};
+use crate::services::users::{
+    create_user, find_password_hash_by_id, find_usr_in_email, update_password_hash,
+};
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = value
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.is_empty())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    Ok(token)
+}
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {
@@ -84,11 +100,7 @@ pub async fn me(
     State(pool): State<PgPool>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<RegisterResponse>, StatusCode> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = bearer_token(&headers)?;
 
     let id = super::sessions::find_session_user(&pool, token)
         .await
@@ -101,13 +113,52 @@ pub async fn logout(
     State(pool): State<PgPool>,
     headers: axum::http::HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = bearer_token(&headers)?;
 
     super::sessions::delete_session(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_pass(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, StatusCode> {
+    if payload.new_password.len() < 12 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let stored_hash = find_password_hash_by_id(&pool, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    password_verify(&payload.current_password, &stored_hash)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let new_hash =
+        hash_password(&payload.new_password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    update_password_hash(&pool, user_id, &new_hash)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    super::sessions::delete_user_session(&pool, user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
