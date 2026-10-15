@@ -38,6 +38,20 @@ async fn main() {
         .finish()
         .expect("Ey! I need a valid config");
 
+    let for_governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(PeerIpKeyExtractor)
+        .per_second(60)
+        .burst_size(3)
+        .finish()
+        .expect("Ey! I need a valid config");
+
+    let res_governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(PeerIpKeyExtractor)
+        .per_second(60)
+        .burst_size(3)
+        .finish()
+        .expect("Ey! I need a valid config");
+
     let app: Router<_> = Router::new()
         .route("/health", get(health))
         .route(
@@ -52,8 +66,14 @@ async fn main() {
         .route("/auth/me", get(me))
         .route("/auth/change-pass", post(change_pass))
         .route("/auth/logout", post(logout))
-        .route("/auth/forgot-pass", post(forgot_password))
-        .route("/auth/reset_password", post(rst_pass_hand))
+        .route(
+            "/auth/forgot-pass",
+            post(forgot_password).layer(GovernorLayer::new(std::sync::Arc::new(for_governor_conf))),
+        )
+        .route(
+            "/auth/reset_password",
+            post(rst_pass_hand).layer(GovernorLayer::new(std::sync::Arc::new(res_governor_conf))),
+        )
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state::<()>(pool);
 
