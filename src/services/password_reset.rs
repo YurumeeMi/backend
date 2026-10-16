@@ -1,3 +1,4 @@
+use crate::services::email::send_rst_email;
 use crate::services::password::hash_password;
 use crate::services::users::find_usr_in_email;
 use axum::{Json, extract::State, http::StatusCode};
@@ -6,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Error, PgPool};
 use uuid::Uuid;
-use crate::services::email::send_rst_email;
 
 #[derive(Deserialize)]
 pub struct ForgotPasswordRequest {
@@ -130,10 +130,11 @@ pub async fn reset_password(
 
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "UPDATE password_reset_tokens
-              SET used_at NOW()
-              WHERE token_hash = $1
-              AND expires_at > NOW()
-              RETURNING user_id",
+             SET used_at = NOW()
+            WHERE token_hash = $1
+            AND expires_at > NOW()
+            AND used_at IS NULL
+            RETURNING user_id",
     )
     .bind(token_hash)
     .fetch_optional(&mut *tx)
@@ -143,7 +144,7 @@ pub async fn reset_password(
         return Ok(false);
     };
 
-    sqlx::query("UPDATE user SET password_hash = $1 WHERE id = $2")
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
         .bind(password_hash)
         .bind(user_id)
         .execute(&mut *tx)
@@ -153,7 +154,7 @@ pub async fn reset_password(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-
+    tx.commit().await?;
     Ok(true)
 }
 
@@ -168,47 +169,42 @@ pub async fn forgot_password(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let user = find_usr_in_email(&pool, &email)
-        .await
-          .map_err(|err| {
+    let user = find_usr_in_email(&pool, &email).await.map_err(|err| {
         eprintln!("User lookup failed: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-eprintln!("DEBUG: user lookup completed; found={}", user.is_some());
+    eprintln!("DEBUG: user lookup completed; found={}", user.is_some());
 
     if let Some((user_id, _)) = user {
         let token = gen_rst_token().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let token_hash = hash_reset_token(&token);
-         replace_rst_token(&pool, user_id, &token_hash)
-         .await
-         .map_err(|err| {
-        eprintln!("Reset token storage failed: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR   
-    })?;
+        replace_rst_token(&pool, user_id, &token_hash)
+            .await
+            .map_err(|err| {
+                eprintln!("Reset token storage failed: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
+        eprintln!("DEBUG: reset token stored");
 
-eprintln!("DEBUG: reset token stored");
+        let base_url =
+            std::env::var("APP_BASE_URL").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let base_url = std::env::var("APP_BASE_URL")
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let reset_url = format!(
+            "{}/reset-password?token={}",
+            base_url.trim_end_matches('/'),
+            token
+        );
 
-    let reset_url = format!(
-       "{}/reset-password?token={}",
-       base_url.trim_end_matches('/'),
-       token
-    );
+        eprintln!("DEBUG: attempting SMTP delivery");
 
-    eprintln!("DEBUG: attempting SMTP delivery");
+        send_rst_email(&email, &reset_url).await.map_err(|err| {
+            eprintln!("Reset email delivery failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-send_rst_email(&email, &reset_url)
-    .await
-    .map_err(|err| {
-        eprintln!("Reset email delivery failed: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-eprintln!("DEBUG: SMTP delivery completed");
+        eprintln!("DEBUG: SMTP delivery completed");
     }
 
     Ok((
@@ -230,7 +226,10 @@ pub async fn rst_pass_hand(
 
     let reset = reset_password(&pool, &token_hash, &payload.new_password)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|err| {
+            eprintln!("Password reset failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if !reset {
         return Err(StatusCode::BAD_REQUEST);

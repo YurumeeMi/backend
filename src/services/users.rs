@@ -29,13 +29,13 @@ pub async fn find_usr_in_email(
 ) -> Result<Option<(Uuid, String)>, sqlx::Error> {
     sqlx::query_as::<_, (Uuid, String)>(
         "SELECT id, password_hash
-              FROM users WHERE email = $1",
+         FROM users
+         WHERE email = $1",
     )
     .bind(email)
     .fetch_optional(pool)
     .await
 }
-
 pub async fn update_password_hash(
     pool: &PgPool,
     user_id: Uuid,

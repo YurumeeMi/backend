@@ -36,29 +36,32 @@ pub async fn register(
     State(pool): State<PgPool>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<RegisterResponse>), StatusCode> {
-    if payload.email.trim().is_empty() || payload.password.is_empty() || payload.password.len() < 12
+    let email = payload.email.trim().to_lowercase();
+
+    if email.is_empty()
+        || !email.contains('@')
+        || email.contains(char::is_whitespace)
+        || payload.password.is_empty()
+        || payload.password.len() < 12
     {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let id = create_user(
-        &pool,
-        &payload.email.trim().to_lowercase(),
-        &payload.password,
-    )
-    .await
-    .map_err(|err| {
-        if let sqlx::Error::Database(db_err) = &err {
-            if db_err.is_unique_violation() {
-                return StatusCode::CONFLICT;
+    let id = create_user(&pool, &email, &payload.password)
+        .await
+        .map_err(|err| {
+            if let sqlx::Error::Database(db_err) = &err {
+                if db_err.is_unique_violation() {
+                    return StatusCode::CONFLICT;
+                }
             }
-        }
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+
+            eprintln!("User registration failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok((StatusCode::CREATED, Json(RegisterResponse { id })))
 }
-
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub email: String,
