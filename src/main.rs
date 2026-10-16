@@ -16,6 +16,7 @@ use tower_governor::{
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL has not been provided");
 
     let pool = PgPoolOptions::new()
@@ -71,7 +72,7 @@ async fn main() {
             post(forgot_password).layer(GovernorLayer::new(std::sync::Arc::new(for_governor_conf))),
         )
         .route(
-            "/auth/reset_password",
+            "/auth/reset-password",
             post(rst_pass_hand).layer(GovernorLayer::new(std::sync::Arc::new(res_governor_conf))),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))

@@ -3,3 +3,4 @@ pub mod password;
 pub mod password_reset;
 pub mod sessions;
 pub mod users;
+pub mod email;

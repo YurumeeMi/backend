@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Error, PgPool};
 use uuid::Uuid;
+use crate::services::email::send_rst_email;
 
 #[derive(Deserialize)]
 pub struct ForgotPasswordRequest {
@@ -88,7 +89,7 @@ pub async fn replace_rst_token(
     sqlx::query(
         "INSERT INTO password_reset_tokens 
         (id, user_id, token_hash, expires_at)
-        VALUES ($1, $2, $3, NOW + INTERVAL '15 minutes')",
+        VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes')",
     )
     .bind(Uuid::new_v4())
     .bind(user_id)
@@ -160,6 +161,7 @@ pub async fn forgot_password(
     State(pool): State<PgPool>,
     Json(payload): Json<ForgotPasswordRequest>,
 ) -> Result<(StatusCode, Json<ForgotPasswordResponse>), StatusCode> {
+    eprintln!("DEBUG: forgot_password handler reached");
     let email = payload.email.trim().to_lowercase();
 
     if email.is_empty() {
@@ -168,19 +170,45 @@ pub async fn forgot_password(
 
     let user = find_usr_in_email(&pool, &email)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+          .map_err(|err| {
+        eprintln!("User lookup failed: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+eprintln!("DEBUG: user lookup completed; found={}", user.is_some());
 
     if let Some((user_id, _)) = user {
         let token = gen_rst_token().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let token_hash = hash_reset_token(&token);
+         replace_rst_token(&pool, user_id, &token_hash)
+         .await
+         .map_err(|err| {
+        eprintln!("Reset token storage failed: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR   
+    })?;
 
-        replace_rst_token(&pool, user_id, &token_hash)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        // TODO: Send the reset link by email when SMTP is configured.
-        // Never return the raw token in the API response.
+eprintln!("DEBUG: reset token stored");
+
+    let base_url = std::env::var("APP_BASE_URL")
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let reset_url = format!(
+       "{}/reset-password?token={}",
+       base_url.trim_end_matches('/'),
+       token
+    );
+
+    eprintln!("DEBUG: attempting SMTP delivery");
+
+send_rst_email(&email, &reset_url)
+    .await
+    .map_err(|err| {
+        eprintln!("Reset email delivery failed: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+eprintln!("DEBUG: SMTP delivery completed");
     }
 
     Ok((
