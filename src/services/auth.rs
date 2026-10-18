@@ -166,6 +166,7 @@ pub async fn change_pass(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -176,13 +177,13 @@ pub async fn logout_all(
     let token = bearer_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    .await 
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::UNAUTHORIZED)?;
 
     super::sessions::delete_user_session(&pool, user_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
