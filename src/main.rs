@@ -7,7 +7,7 @@ use axum::{
 };
 use services::auth::{change_pass, login, logout, me};
 use services::password_reset::{forgot_password, rst_pass_hand};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{pool::maybe::MaybePoolConnection::PoolConnection, postgres::PgPoolOptions};
 use std::env;
 use std::net::SocketAddr;
 use tower_governor::{
@@ -24,6 +24,11 @@ async fn main() {
         .connect(&database_url)
         .await
         .expect("Connection Failed");
+
+    sqlx::migrate!("./migrations")
+    .run(&pool)
+    .await
+    .expect("DB MIGRATIONS FAILED");
 
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(PeerIpKeyExtractor)
