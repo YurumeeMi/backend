@@ -1,5 +1,5 @@
 mod services;
-use crate::services::auth::register;
+use crate::services::auth::{logout_all, register};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -26,9 +26,9 @@ async fn main() {
         .expect("Connection Failed");
 
     sqlx::migrate!("./migrations")
-    .run(&pool)
-    .await
-    .expect("DB MIGRATIONS FAILED");
+        .run(&pool)
+        .await
+        .expect("DB MIGRATIONS FAILED");
 
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(PeerIpKeyExtractor)
@@ -71,6 +71,7 @@ async fn main() {
         )
         .route("/auth/me", get(me))
         .route("/auth/change-pass", post(change_pass))
+        .route("/auth/logout-all", post(logout_all))
         .route("/auth/logout", post(logout))
         .route(
             "/auth/forgot-pass",

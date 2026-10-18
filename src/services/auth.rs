@@ -2,6 +2,7 @@ use crate::services::password::{hash_password, password_verify};
 use crate::services::users::{
     create_user, find_password_hash_by_id, find_usr_in_email, update_password_hash,
 };
+use axum::routing::head;
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -160,6 +161,24 @@ pub async fn change_pass(
     update_password_hash(&pool, user_id, &new_hash)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    super::sessions::delete_user_session(&pool, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn logout_all(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     super::sessions::delete_user_session(&pool, user_id)
         .await
