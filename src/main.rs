@@ -5,9 +5,9 @@ use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
 };
-use services::auth::{change_pass, login, logout, me};
+use services::auth::{change_pass,  create_org, login, logout, me};
 use services::password_reset::{forgot_password, rst_pass_hand};
-use sqlx::{pool::maybe::MaybePoolConnection::PoolConnection, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions};
 use std::env;
 use std::net::SocketAddr;
 use tower_governor::{
@@ -69,6 +69,7 @@ async fn main() {
             axum::routing::post(login)
                 .layer(GovernorLayer::new(std::sync::Arc::new(governor_conf))),
         )
+        .route("/organizations", post(create_org))
         .route("/auth/me", get(me))
         .route("/auth/change-pass", post(change_pass))
         .route("/auth/logout-all", post(logout_all))

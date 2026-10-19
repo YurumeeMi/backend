@@ -166,7 +166,6 @@ pub async fn change_pass(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -177,13 +176,48 @@ pub async fn logout_all(
     let token = bearer_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
-    .await 
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::UNAUTHORIZED)?;
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     super::sessions::delete_user_session(&pool, user_id)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct CreateOrgReq {
+    name: String,
+}
+#[derive(Serialize)]
+pub struct CreateOrgRes {
+    id: Uuid,
+}
+pub async fn create_org(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<CreateOrgReq>,
+) -> Result<(StatusCode, Json<CreateOrgRes>), StatusCode> {
+    let name = payload.name.trim();
+
+    if name.is_empty() || name.len() > 120 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let id = super::organizations::create_organization(&pool, user_id, name)
+        .await
+        .map_err(|err| {
+            eprint!("Org creation failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok((StatusCode::CREATED, Json(CreateOrgRes { id })))
 }
