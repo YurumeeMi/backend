@@ -1,8 +1,8 @@
+use crate::services::organizations;
 use crate::services::password::{hash_password, password_verify};
 use crate::services::users::{
     create_user, find_password_hash_by_id, find_usr_in_email, update_password_hash,
 };
-use axum::routing::head;
 use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -220,4 +220,115 @@ pub async fn create_org(
         })?;
 
     Ok((StatusCode::CREATED, Json(CreateOrgRes { id })))
+}
+
+#[derive(Serialize)]
+pub struct ListOrgRep {
+    organizations: Vec<OrgItems>,
+}
+
+#[derive(Serialize)]
+pub struct OrgItems {
+    id: Uuid,
+    name: String,
+    role: String,
+}
+
+pub async fn list_org(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<ListOrgRep>, StatusCode> {
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let rows = super::organizations::list_user_org(&pool, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let organizations = rows
+        .into_iter()
+        .map(|(id, name, role)| OrgItems { id, name, role })
+        .collect();
+
+    Ok(Json(ListOrgRep { organizations }))
+}
+
+#[derive(Serialize)]
+pub struct GetOrgRep {
+    id: Uuid,
+    name: String,
+    role: String,
+}
+
+pub async fn get_org(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(organization_id): axum::extract::Path<Uuid>,
+) -> Result<Json<GetOrgRep>, StatusCode> {
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let (id, name, role) = super::organizations::get_user_org(&pool, user_id, organization_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(GetOrgRep { id, name, role }))
+}
+
+#[derive(Deserialize)]
+pub struct AddMemReq {
+    user_id: Uuid,
+    role: String,
+}
+
+#[derive(Serialize)]
+pub struct AddMemRes {
+    message: String,
+}
+
+pub async fn add_mem_org(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(organization_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<AddMemReq>,
+) -> Result<(StatusCode, Json<AddMemRes>), StatusCode> {
+    if !["admin", "member"].contains(&payload.role.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let token = bearer_token(&headers)?;
+
+    let caller_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let caller_role = organizations::get_mem_role(&pool, organization_id, caller_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !matches!(caller_role.as_deref(), Some("owner" | "admin")) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    organizations::add_mem(&pool, organization_id, payload.user_id, &payload.role)
+        .await
+        .map_err(|err| {
+            eprintln!("Adding Memer fail: {err}");
+            StatusCode::CONFLICT
+        })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AddMemRes {
+            message: ("Member added".to_string()),
+        }),
+    ))
 }
