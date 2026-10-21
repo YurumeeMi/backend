@@ -3,9 +3,10 @@ use crate::services::password::{hash_password, password_verify};
 use crate::services::users::{
     create_user, find_password_hash_by_id, find_usr_in_email, update_password_hash,
 };
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{Json, extract::Path, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use sqlx::pool::maybe::MaybePoolConnection::PoolConnection;
 use uuid::Uuid;
 
 fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
@@ -331,4 +332,146 @@ pub async fn add_mem_org(
             message: ("Member added".to_string()),
         }),
     ))
+}
+
+#[derive(Deserialize)]
+pub struct CreateAccountReq {
+    code: String,
+    name: String,
+    account_type: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateAccountRes {
+    id: Uuid,
+}
+
+pub async fn create_account(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(organization_id): axum::extract::Path<Uuid>,
+    Json(payload): Json<CreateAccountReq>,
+) -> Result<(StatusCode, Json<CreateAccountRes>), StatusCode> {
+    let code = payload.code.trim();
+    let name = payload.name.trim();
+    let account_type = payload.account_type.trim();
+
+    if code.is_empty()
+        || code.len() > 32
+        || name.is_empty()
+        || name.len() > 120
+        || !["asset", "liablity", "equity", "revenue", "expense"].contains(&account_type)
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let id = super::accounts::create_account(&pool, organization_id, code, name, account_type)
+        .await
+        .map_err(|err| {
+            eprintln!("Account creation failed: {err}");
+            StatusCode::CONFLICT
+        })?;
+
+    Ok((StatusCode::CREATED, Json(CreateAccountRes { id })))
+}
+
+#[derive(Serialize)]
+pub struct AccountItem {
+    id: Uuid,
+    code: String,
+    name: String,
+    account_type: String,
+    is_active: bool,
+}
+#[derive(Serialize)]
+pub struct ListAccRes {
+    accounts: Vec<AccountItem>,
+}
+
+pub async fn list_acc(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(organization_id): axum::extract::Path<Uuid>,
+) -> Result<Json<ListAccRes>, StatusCode> {
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let rows = super::accounts::list_acconuts(&pool, organization_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let accounts = rows
+        .into_iter()
+        .map(|(id, code, name, account_type, is_active)| AccountItem {
+            id,
+            code,
+            name,
+            account_type,
+            is_active,
+        })
+        .collect();
+
+    Ok(Json(ListAccRes { accounts }))
+}
+
+pub async fn get_acc(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    Path((organization_id, account_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<AccountItem>, StatusCode> {
+    let token = bearer_token(&headers)?;
+
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let (id, code, name, account_type, is_active) =
+        super::accounts::get_account(&pool, organization_id, account_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(AccountItem {
+        id,
+        code,
+        name,
+        account_type,
+        is_active,
+    }))
 }
