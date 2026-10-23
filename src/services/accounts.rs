@@ -1,4 +1,3 @@
-use sha2::digest::typenum::Or;
 use sqlx::PgPool;
 use uuid::Uuid;
 

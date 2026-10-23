@@ -1,8 +1,10 @@
 pub mod accounts;
 pub mod auth;
 pub mod email;
+pub mod journal_entries;
 pub mod organizations;
 pub mod password;
 pub mod password_reset;
 pub mod sessions;
 pub mod users;
+pub mod journal_entry_handlers;

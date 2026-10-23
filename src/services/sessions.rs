@@ -54,14 +54,6 @@ pub async fn delete_session(pool: &PgPool, token: &str) -> Result<(), sqlx::Erro
     Ok(())
 }
 
-pub async fn delete_expired_session(pool: &PgPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM sessions WHERE expires_at <= NOW()")
-        .execute(pool)
-        .await?;
-
-    Ok(result.rows_affected())
-}
-
 pub async fn delete_user_session(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM sessions WHERE user_id =$1")
         .bind(user_id)

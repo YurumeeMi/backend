@@ -6,7 +6,6 @@ use crate::services::users::{
 use axum::{Json, extract::Path, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use sqlx::pool::maybe::MaybePoolConnection::PoolConnection;
 use uuid::Uuid;
 
 fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
