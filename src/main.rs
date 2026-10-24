@@ -1,5 +1,11 @@
 mod services;
-use crate::services::{auth::{logout_all, register,}, journal_entry_handlers::{create_journal_entry, create_journal_line, list_journal_lines, post_journal_entry}};
+use crate::services::{
+    auth::{logout_all, register},
+    journal_entry_handlers::{
+        create_journal_entry, create_journal_line, get_general_ledger, get_trial_balance,
+        list_journal_lines, post_journal_entry,
+    },
+};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
@@ -81,8 +87,19 @@ async fn main() {
             "/organizations/{id}/journal_entries",
             post(create_journal_entry),
         )
-        .route("/organizations/{id}/journal_entries/{entry_id}/post" , post(post_journal_entry),)
-        .route("/organizations/{id}/journal_entries/{entry_id}/lines", post(create_journal_line).get(list_journal_lines,))
+        .route("/organizations/{id}/trial_balance", get(get_trial_balance))
+        .route(
+            "/organizations/{id}/accounts/{account_id}/ledger",
+            get(get_general_ledger),
+        )
+        .route(
+            "/organizations/{id}/journal_entries/{entry_id}/post",
+            post(post_journal_entry),
+        )
+        .route(
+            "/organizations/{id}/journal_entries/{entry_id}/lines",
+            post(create_journal_line).get(list_journal_lines),
+        )
         .route("/organizations/{id}/accounts/{account_id}", get(get_acc))
         .route("/organizations/{id}", get(get_org))
         .route("/organizations/{id}/members", post(add_mem_org))

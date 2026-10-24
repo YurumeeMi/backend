@@ -57,3 +57,38 @@ pub async fn get_account(
     .fetch_optional(pool)
     .await
 }
+
+pub async fn get_trial_balance(
+    pool: &PgPool,
+    organization_id: Uuid,
+) -> Result<Vec<(Uuid, String, String, String, bool, String, String)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, String, String, String, bool, String, String)>(
+        r#"SELECT
+                    a.id,
+                    a.code,
+                    a.name,
+                    a.account_type,
+                    a.is_active,
+                    COALESCE(SUM(jl.debit), 0)::text AS total_debit,
+                    COALESCE(SUM(jl.credit), 0)::text AS total_credit
+                FROM accounts a 
+               LEFT JOIN journal_lines jl
+               ON jl.account_id = a.id
+               AND jl.organization_id = a.organization_id
+               AND EXISTS (
+               SELECT 1
+               FROM journal_entries je
+               WHERE je.id = jl.journal_entry_id
+                AND je.organization_id = jl.organization_id
+                AND je.status = 'posted'
+                )
+                WHERE a.organization_id = $1
+                GROUP BY
+                       a.id, a.code, a.name, a.account_type, a.is_active
+                ORDER BY a.code
+                "#,
+    )
+    .bind(organization_id)
+    .fetch_all(pool)
+    .await
+}

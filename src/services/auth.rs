@@ -359,7 +359,7 @@ pub async fn create_account(
         || code.len() > 32
         || name.is_empty()
         || name.len() > 120
-        || !["asset", "liablity", "equity", "revenue", "expense"].contains(&account_type)
+        || !["asset", "liability", "equity", "revenue", "expense"].contains(&account_type)
     {
         return Err(StatusCode::BAD_REQUEST);
     }

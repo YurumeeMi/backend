@@ -119,6 +119,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "bigdecimal",
  "chrono",
  "dotenvy",
  "lettre",
@@ -161,6 +162,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
