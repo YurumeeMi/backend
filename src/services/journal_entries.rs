@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+
 pub async fn create_journal_entry(
     pool: &PgPool,
     organization_id: Uuid,
@@ -181,12 +182,18 @@ pub async fn get_general_ledger(
     pool: &PgPool,
     organization_id: Uuid,
     account_id: Uuid,
+    from: Option<chrono::NaiveDate>,
+    until: Option<chrono::NaiveDate>,
+    limit: i64,
+    offset: i64,
 ) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
     sqlx::query(
         "
-    SELECT
+        WITH ledger AS ( 
+          SELECT
           je.id AS journal_entry_id,
           je.entry_date,
+          je.created_at,
           je.description AS entry_description,
           je.reference,
           jl.id AS journal_line_id,
@@ -203,10 +210,20 @@ pub async fn get_general_ledger(
               WHERE jl.organization_id = $1
               AND jl.account_id = $2
               AND je.status = 'posted'
-              ORDER BY je.entry_date, je.created_at, jl.id",
+           )
+            SELECT *
+            FROM ledger
+            WHERE ($3::date IS NULL OR entry_date >= $3)
+             AND ($4::date IS NULL OR entry_date <= $4)
+            ORDER BY entry_date, created_at, journal_line_id
+            LIMIT $5 OFFSET $6",
     )
     .bind(organization_id)
     .bind(account_id)
+    .bind(from)
+    .bind(until)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await
 }

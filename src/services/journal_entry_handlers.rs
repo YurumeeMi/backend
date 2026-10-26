@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, State, Query},
     http::StatusCode,
 };
 use chrono::NaiveDate;
@@ -380,11 +380,29 @@ pub struct GenLedItem {
     running_balance: sqlx::types::BigDecimal,
 }
 
+#[derive(Deserialize)]
+pub struct LedegerQuery {
+    pub from: Option<chrono::NaiveDate>,
+    pub until: Option<chrono::NaiveDate>,
+    pub limit:  Option<i64>,
+    pub  offset:  Option<i64>,
+}
+
 pub async fn get_general_ledger(
     State(pool): State<PgPool>,
     headers: axum::http::HeaderMap,
     Path((organization_id, account_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<LedegerQuery>,
 ) -> Result<Json<Vec<GenLedItem>>, StatusCode> {
+
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    if let (Some(from), Some(until)) = (query.from, query.until) {
+        if from > until {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
     let token = bearer_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
@@ -412,7 +430,7 @@ pub async fn get_general_ledger(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let rows = super::journal_entries::get_general_ledger(&pool, organization_id, account_id)
+    let rows = super::journal_entries::get_general_ledger(&pool, organization_id, account_id,  query.from, query.until, limit, offset)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -454,6 +472,7 @@ pub struct TrialBalanceRes {
     total_credit: String,
     balanced: bool,
 }
+
 
 pub async fn get_trial_balance(
     State(pool): State<PgPool>,
@@ -535,3 +554,4 @@ pub async fn get_trial_balance(
         balanced,
     }))
 }
+
