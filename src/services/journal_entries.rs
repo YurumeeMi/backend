@@ -189,7 +189,7 @@ pub async fn get_general_ledger(
 ) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
     sqlx::query(
         "
-        WITH ledger AS ( 
+        WITH ledger AS (
           SELECT
           je.id AS journal_entry_id,
           je.entry_date,
@@ -224,6 +224,52 @@ pub async fn get_general_ledger(
     .bind(until)
     .bind(limit)
     .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
+
+pub async fn get_pf_and_loss(
+    pool: &PgPool,
+    organization_id: Uuid,
+    from: NaiveDate,
+    until: NaiveDate,
+) -> Result<Vec<(String, String, String, String)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, String, String, String)>(
+        r#"
+              SELECT
+                    a.account_type,
+                    a.id::text,
+                    a.name,
+                    COALESCE(
+                         SUM (
+                              CASE
+                                  WHEN a.account_type = 'revenue'
+                                  THEN jl.credit - jl.debit
+                                ELSE jl.debit - jl.credit
+                                END
+                           ) FILTER (WHERE je.id IS NOT NULL),
+                           0
+                           )::text AS AMOUNT
+                           FROM accounts a
+                           LEFT JOIN journal_lines jl
+                           ON jl.account_id = a.id
+                           AND jl.organization_id = a.organization_id
+                           LEFT JOIN journal_entries je
+                           ON je.id = jl.journal_entry_id
+                           AND je.organization_id = jl.organization_id
+                           AND je.status = 'posted'
+                           AND je.entry_date >= $2
+                           AND je.entry_date <= $3
+                           WHERE a.organization_id = $1
+                                 AND a.account_type IN ('revenue', 'expense')
+                           GROUP BY a.account_type, a.id, a.name
+                           ORDER BY a.account_type, a.name"#,
+
+    )
+    .bind(organization_id)
+    .bind(from)
+    .bind(until)
     .fetch_all(pool)
     .await
 }

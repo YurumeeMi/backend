@@ -1,12 +1,13 @@
 use axum::{
-    Json,
-    extract::{Path, State, Query},
-    http::StatusCode,
+    Json, extract::{Path, Query, State}, http::StatusCode,
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
+use sqlx::types::BigDecimal;
+use std::str::FromStr;
+
 
 #[derive(Deserialize)]
 pub struct CrJnulEntReq {
@@ -514,7 +515,7 @@ pub async fn get_trial_balance(
     let mut total_credit = BigDecimal::from(0);
 
     for row in &rows {
-        let debit = BigDecimal::from_str(&row.6).map_err(|err| {
+        let debit = BigDecimal::from_str(&row.5).map_err(|err| {
             eprintln!("Invalid debit totoal: {err}");
             StatusCode::IM_A_TEAPOT
         })?;
@@ -555,3 +556,99 @@ pub async fn get_trial_balance(
     }))
 }
 
+
+#[derive(Serialize)]
+pub struct ProfitLossItem {
+    account_type: String,
+    account_id: String,
+    account_name: String,
+    amount: String,
+}
+
+#[derive(Deserialize)]
+pub struct ProfitLossQuery {
+    from: NaiveDate,
+    until: NaiveDate,
+}
+
+#[derive(serde::Serialize)]
+pub struct ProfitLossReport {
+    revenue: Vec<ProfitLossItem>,
+    expenses: Vec<ProfitLossItem>,
+    total_revenue: String,
+    total_expenses: String,
+    net_profit: String,
+}
+
+pub async fn get_pf_and_loss(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    Path(organization_id): Path<Uuid>,
+    Query(query): Query<ProfitLossQuery>,
+) -> Result<Json<ProfitLossReport>, StatusCode> {
+     if query.from > query.until {
+        return Err(StatusCode::BAD_REQUEST);
+     }
+     let token=  bearer_token(&headers)?;
+
+     let user_id = super::sessions::find_session_user(&pool, token).await.map_err(|_| { StatusCode::IM_A_TEAPOT})?.ok_or(StatusCode::UNAUTHORIZED)?;
+
+     let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+        .await
+        .map_err(|err| {
+            eprintln!("Membership lookup failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let rows = super::journal_entries::get_pf_and_loss(&pool, organization_id, query.from, query.until).await.map_err(|err| {
+        eprintln!("Pf & Los query failed: {err}");
+        StatusCode::IM_A_TEAPOT
+    })?;
+
+    let mut revenue = Vec::new();
+    let mut expenses = Vec::new();
+
+    let mut total_revenue = BigDecimal::from(0);
+    let mut total_expenses = BigDecimal::from(0);
+
+    for (account_type, account_id, account_name, amount) in rows {
+        let value = BigDecimal::from_str(&amount).map_err(|err| {
+            eprintln!("Invalid report amount: {err}");
+            StatusCode::IM_A_TEAPOT
+        })?;
+
+    let item = ProfitLossItem {
+        account_type: account_type.clone(),
+        account_id,
+        account_name,
+        amount,
+    };
+    match account_type.as_str()
+ {
+    "revenue" => {
+        total_revenue += value;
+        revenue.push(item);
+    }
+    "expense" => {
+        total_expenses += value;
+        expenses.push(item);
+    }
+    _ => {}
+  }
+
+ }
+
+    let net_profit = &total_revenue - &total_expenses;
+
+    Ok(Json(ProfitLossReport {
+        revenue,
+        expenses,
+        total_revenue: total_revenue.to_string(),
+        total_expenses: total_expenses.to_string(),
+        net_profit: net_profit.to_string(),
+    }))
+}
