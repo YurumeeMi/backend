@@ -1,7 +1,7 @@
 mod services;
 use crate::services::{
     auth::{logout_all, register}, journal_entry_handlers::{
-        create_journal_entry, create_journal_line, get_general_ledger, get_pf_and_loss, get_trial_balance, list_journal_lines, post_journal_entry
+        create_journal_entry, create_journal_line, get_general_ledger, get_pf_and_loss, get_trial_balance, list_journal_lines, post_journal_entry, get_bal_sheet
     },
 };
 use axum::{
@@ -98,6 +98,7 @@ async fn main() {
             "/organizations/{id}/journal_entries/{entry_id}/lines",
             post(create_journal_line).get(list_journal_lines),
         )
+        .route("/organizations/{id}/reports/balance-sheet", get(get_bal_sheet),)
         .route("/organizations/{id}/accounts/{account_id}", get(get_acc))
         .route("/organizations/{id}/reports/profit-loss", get(get_pf_and_loss),)
         .route("/organizations/{id}", get(get_org))

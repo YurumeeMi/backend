@@ -273,3 +273,82 @@ pub async fn get_pf_and_loss(
     .fetch_all(pool)
     .await
 }
+
+pub async fn get_bal_sheet(
+    pool: &PgPool,
+    organization_id: Uuid,
+    as_of: NaiveDate,
+) -> Result<Vec<(String, String, String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        r#"
+               SELECT
+                   a.account_type,
+                   a.id::TEXT,
+                   a.name,
+                   COALESCE(
+                        SUM( 
+                            CASE 
+                                WHEN a.account_type = 'asset'
+                                     THEN jl.debit - jl.credit
+                                ELSE jl.credit - jl.debit
+                            END 
+                        ) FILTER (WHERE je.id IS NOT NULL),
+                        0
+                    )::TEXT AS amount
+                FROM accounts a 
+                LEFT JOIN journal_lines jl
+                     ON jl.account_id = a.id
+                     AND jl.organization_id = a.organization_id
+                LEFT JOIN journal_entries je
+                     ON je.id = jl.journal_entry_id
+                     AND je.organization_id = a.organization_id
+                     AND je.status = 'posted'
+                     AND je.entry_date <= $2
+                WHERE a.organization_id = $1
+                      AND a.account_type IN ('asset', 'liability', 'equity')
+                GROUP BY a.account_type, a.id, a.name
+                ORDER BY a.account_type, a.name"#
+    )
+    .bind(organization_id)
+    .bind(as_of)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn get_current_earnings(
+    pool: &PgPool,
+    organization_id: Uuid,
+    as_of: NaiveDate,
+) -> Result<String, sqlx::Error> {
+    sqlx::query_scalar(
+        r#" 
+               SELECT COALESCE(
+                           SUM(
+                               CASE
+                                   WHEN a.account_type = 'revenue'
+                                       THEN jl.credit - jl.debit
+                                    WHEN a.account_type = 'expense'
+                                          THEN jl.debit - jl.credit
+                                    ELSE 0
+                                END
+                            ) FILTER (WHERE je.id IS NOT NULL),
+                            0
+                        )::TEXT
+                        FROM accounts a
+                        LEFT JOIN journal_lines jl
+                             ON jl.account_id = a.id
+                             AND jl.organization_id = a.organization_id
+                        LEFT JOIN journal_entries je
+                             ON je.id = jl.journal_entry_id
+                             AND je.organization_id = a.organization_id
+                             AND je.status = 'posted'
+                             AND je.entry_date <= $2
+                        WHERE a.organization_id = $1
+                            AND a.account_type IN ('revenue', 'expense')
+                "#,               
+    )
+    .bind(organization_id)
+    .bind(as_of)
+    .fetch_one(pool)
+    .await
+}

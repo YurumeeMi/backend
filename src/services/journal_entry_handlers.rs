@@ -3,7 +3,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgPool};
 use uuid::Uuid;
 use sqlx::types::BigDecimal;
 use std::str::FromStr;
@@ -651,4 +651,110 @@ pub async fn get_pf_and_loss(
         total_expenses: total_expenses.to_string(),
         net_profit: net_profit.to_string(),
     }))
+}
+
+#[derive(Serialize)]
+pub struct BalanceSheetItem {
+    account_id: String,
+    account_name: String,
+    amount: String,
+}
+
+#[derive(Serialize)]
+pub struct BalSheetReport {
+    as_of: NaiveDate,
+    assets: Vec<BalanceSheetItem>,
+    liabilities: Vec<BalanceSheetItem>,
+    equity: Vec<BalanceSheetItem>,
+    total_assets: String,
+    total_liabilities: String,
+    total_equity: String,
+    current_earnings: String,
+    balanced: bool,
+}
+
+#[derive(Deserialize)]
+pub struct BalSheetQuery {
+    as_of: NaiveDate,
+}
+
+pub async fn get_bal_sheet(
+    State(pool): State<PgPool>,
+    headers: axum::http::HeaderMap,
+    Path(organization_id): Path<Uuid>,
+    Query(query): Query<BalSheetQuery>,
+) -> Result<Json<BalSheetReport>, StatusCode> {
+    let as_of = query.as_of;
+    let token = bearer_token(&headers)?;
+
+     let user_id = super::sessions::find_session_user(&pool, token).await.map_err(|_| { StatusCode::IM_A_TEAPOT})?.ok_or(StatusCode::UNAUTHORIZED)?;
+
+     let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+        .await
+        .map_err(|err| {
+            eprintln!("Membership lookup failed: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    let rows = super::journal_entries::get_bal_sheet(&pool, organization_id, as_of).await.map_err(|err| {
+        eprintln!("GAO! {err}");
+        StatusCode::IM_A_TEAPOT
+    })?;
+
+    let mut assets = Vec::new();
+    let mut liabilities = Vec::new();
+    let mut equity = Vec::new();
+
+    let mut total_assets = BigDecimal::from(0);
+    let mut total_liabilities = BigDecimal::from(0);
+    let mut total_equity = BigDecimal::from(0);
+
+    for row in rows {
+        let amount = BigDecimal::from_str(&row.3)
+        .map_err(|_| StatusCode::IM_A_TEAPOT)?;
+
+        let item = BalanceSheetItem {
+            account_id: row.1,
+            account_name: row.2,
+            amount: amount.to_string()
+        };
+
+        match row.0.as_str() {
+            "asset" => {
+                total_assets += &amount;
+                assets.push(item);
+            }
+            "liability" => {
+                total_liabilities += &amount;
+                liabilities.push(item);
+            }
+            "equity" => {
+                total_equity += &amount;
+                equity.push(item);
+            }
+            _ => {}
+        }
+    }
+
+    let current_earn_str = super::journal_entries::get_current_earnings(&pool, organization_id, as_of)
+    .await
+    .map_err(|err| {
+        eprintln!("Failed to fetch earnings: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let current_earnings = BigDecimal::from_str(&current_earn_str)
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let balanced = 
+    total_assets == &total_liabilities + &total_equity + &current_earnings;
+
+    Ok(Json(BalSheetReport { as_of, assets, liabilities, equity, total_assets: total_assets.to_string(), total_liabilities: total_liabilities.to_string(), total_equity: total_equity.to_string(), current_earnings: current_earnings.to_string(), balanced }))
+
+    
+
 }
