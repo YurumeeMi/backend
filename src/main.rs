@@ -5,9 +5,7 @@ use crate::services::{
     },
 };
 use axum::{
-    Router,
-    extract::DefaultBodyLimit,
-    routing::{get, post},
+    Router, extract::DefaultBodyLimit, http::{Method, header}, routing::{get, post},
 };
 use services::auth::{
     add_mem_org, change_pass, create_account, create_org, get_acc, get_org, list_acc, list_org,
@@ -20,6 +18,7 @@ use std::net::SocketAddr;
 use tower_governor::{
     GovernorLayer, governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor,
 };
+use tower_http::cors::CorsLayer;
 
 #[tokio::main]
 async fn main() {
@@ -37,6 +36,7 @@ async fn main() {
         .await
         .expect("DB MIGRATIONS FAILED");
 
+    
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(PeerIpKeyExtractor)
         .per_second(12)
@@ -64,6 +64,13 @@ async fn main() {
         .burst_size(3)
         .finish()
         .expect("Ey! I need a valid config");
+
+    let cors = CorsLayer::new()
+    .allow_origin(["http://localhost:5173".parse().unwrap(),
+                 "http://127.0.0.1:5173".parse().unwrap(),
+                 ])
+                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let app: Router<_> = Router::new()
         .route("/health", get(health))
@@ -115,6 +122,7 @@ async fn main() {
             "/auth/reset-password",
             post(rst_pass_hand).layer(GovernorLayer::new(std::sync::Arc::new(res_governor_conf))),
         )
+        .layer(cors)
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state::<()>(pool);
 
