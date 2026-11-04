@@ -135,14 +135,23 @@ pub async fn me(
 pub async fn logout(
     State(pool): State<PgPool>,
     headers: axum::http::HeaderMap,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<(StatusCode, axum::http::HeaderMap), StatusCode> {
     let token = bearer_token(&headers)?;
 
     super::sessions::delete_session(&pool, token)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(StatusCode::NO_CONTENT)
+    let mut response_headers = axum::http::HeaderMap::new();
+
+    response_headers.insert(
+        axum::http::header::SET_COOKIE,
+        "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
+        .parse()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    );
+
+    Ok((StatusCode::NO_CONTENT, response_headers))
 }
 
 #[derive(Deserialize)]
