@@ -8,18 +8,24 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+
 fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
-    let value = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    headers
+    .get(axum::http::header::COOKIE)
+    .and_then(|value| value.to_str().ok())
+    .and_then(|cookies| {
+        cookies.split(";").find.map(|cookie| {
+            let (name, value) = cookie.trim().split_once('=')
 
-    let token = value
-        .strip_prefix("Bearer ")
-        .filter(|token| !token.is_empty())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    Ok(token)
+            if name == "session" && !value.is_empty() {
+                Some(value)
+            } else {
+                None
+            }
+        })
+    })
+    .ok_or(StatusCode::UNAUTHORIZED)
 }
 
 #[derive(Deserialize)]
@@ -71,14 +77,13 @@ pub struct LoginRequest {
 
 #[derive(Serialize)]
 pub struct LoginResponse {
-    pub token: String,
     pub id: Uuid,
 }
 
 pub async fn login(
     State(pool): State<PgPool>,
     Json(payload): Json<LoginRequest>,
-) -> Result<(StatusCode, Json<LoginResponse>), StatusCode> {
+) -> Result<(StatusCode, axum::http::HeaderMap, Json<LoginResponse>), StatusCode> {
     if payload.email.trim().is_empty() || payload.password.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -97,7 +102,21 @@ pub async fn login(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((StatusCode::OK, Json(LoginResponse { id, token })))
+    let mut headers = axum::http::HeaderMap::new();
+
+    let cookie = format!(
+        "session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800"
+    );
+
+    headers.insert(
+        axum::http::header::SET_COOKIE,
+        cookie.parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    );
+
+    Ok(( StatusCode::OK,
+         headers,
+        Json(LoginResponse {id})
+    ))
 }
 
 pub async fn me(
