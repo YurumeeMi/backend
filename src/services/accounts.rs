@@ -7,19 +7,21 @@ pub async fn create_account(
     code: &str,
     name: &str,
     account_type: &str,
+    opening_balance: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let id = Uuid::new_v4();
 
     sqlx::query(
         "INSERT INTO accounts
-         (id, organization_id, code, name, account_type)
-         VALUES ($1, $2, $3, $4, $5)",
+         (id, organization_id, code, name, account_type, opening_balance)
+         VALUES ($1, $2, $3, $4, $5, $6::numeric)",
     )
     .bind(id)
     .bind(organization_id)
     .bind(code)
     .bind(name)
     .bind(account_type)
+    .bind(opening_balance)
     .execute(pool)
     .await?;
 
@@ -29,9 +31,9 @@ pub async fn create_account(
 pub async fn list_acconuts(
     pool: &PgPool,
     organization_id: Uuid,
-) -> Result<Vec<(Uuid, String, String, String, bool)>, sqlx::Error> {
-    sqlx::query_as::<_, (Uuid, String, String, String, bool)>(
-        "SELECT id, code, name, account_type, is_active
+) -> Result<Vec<(Uuid, String, String, String, String, bool)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, String, String, String, String, bool)>(
+        "SELECT id, code, name, account_type, opening_balance::text, is_active
     FROM accounts
     WHERE organization_id = $1
     ORDER BY code",
@@ -45,9 +47,9 @@ pub async fn get_account(
     pool: &PgPool,
     organization_id: Uuid,
     account_id: Uuid,
-) -> Result<Option<(Uuid, String, String, String, bool)>, sqlx::Error> {
-    sqlx::query_as::<_, (Uuid, String, String, String, bool)>(
-        "SELECT id, code, name, account_type, is_active
+) -> Result<Option<(Uuid, String, String, String, String, bool)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, String, String, String, String, bool)>(
+        "SELECT id, code, name, account_type, opening_balance::text, is_active
          FROM accounts
          WHERE organization_id = $1
            AND id = $2",

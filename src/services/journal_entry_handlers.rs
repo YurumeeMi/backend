@@ -1,13 +1,14 @@
 use axum::{
-    Json, extract::{Path, Query, State}, http::StatusCode,
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool};
-use uuid::Uuid;
+use sqlx::PgPool;
 use sqlx::types::BigDecimal;
 use std::str::FromStr;
-
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct CrJnulEntReq {
@@ -385,8 +386,8 @@ pub struct GenLedItem {
 pub struct LedegerQuery {
     pub from: Option<chrono::NaiveDate>,
     pub until: Option<chrono::NaiveDate>,
-    pub limit:  Option<i64>,
-    pub  offset:  Option<i64>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 pub async fn get_general_ledger(
@@ -395,7 +396,6 @@ pub async fn get_general_ledger(
     Path((organization_id, account_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<LedegerQuery>,
 ) -> Result<Json<Vec<GenLedItem>>, StatusCode> {
-
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
 
@@ -431,9 +431,17 @@ pub async fn get_general_ledger(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let rows = super::journal_entries::get_general_ledger(&pool, organization_id, account_id,  query.from, query.until, limit, offset)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = super::journal_entries::get_general_ledger(
+        &pool,
+        organization_id,
+        account_id,
+        query.from,
+        query.until,
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     use sqlx::Row;
 
@@ -473,7 +481,6 @@ pub struct TrialBalanceRes {
     total_credit: String,
     balanced: bool,
 }
-
 
 pub async fn get_trial_balance(
     State(pool): State<PgPool>,
@@ -556,7 +563,6 @@ pub async fn get_trial_balance(
     }))
 }
 
-
 #[derive(Serialize)]
 pub struct ProfitLossItem {
     account_type: String,
@@ -586,14 +592,17 @@ pub async fn get_pf_and_loss(
     Path(organization_id): Path<Uuid>,
     Query(query): Query<ProfitLossQuery>,
 ) -> Result<Json<ProfitLossReport>, StatusCode> {
-     if query.from > query.until {
+    if query.from > query.until {
         return Err(StatusCode::BAD_REQUEST);
-     }
-     let token=  bearer_token(&headers)?;
+    }
+    let token = bearer_token(&headers)?;
 
-     let user_id = super::sessions::find_session_user(&pool, token).await.map_err(|_| { StatusCode::IM_A_TEAPOT})?.ok_or(StatusCode::UNAUTHORIZED)?;
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::IM_A_TEAPOT)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-     let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+    let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
         .await
         .map_err(|err| {
             eprintln!("Membership lookup failed: {err}");
@@ -604,10 +613,13 @@ pub async fn get_pf_and_loss(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let rows = super::journal_entries::get_pf_and_loss(&pool, organization_id, query.from, query.until).await.map_err(|err| {
-        eprintln!("Pf & Los query failed: {err}");
-        StatusCode::IM_A_TEAPOT
-    })?;
+    let rows =
+        super::journal_entries::get_pf_and_loss(&pool, organization_id, query.from, query.until)
+            .await
+            .map_err(|err| {
+                eprintln!("Pf & Los query failed: {err}");
+                StatusCode::IM_A_TEAPOT
+            })?;
 
     let mut revenue = Vec::new();
     let mut expenses = Vec::new();
@@ -621,26 +633,24 @@ pub async fn get_pf_and_loss(
             StatusCode::IM_A_TEAPOT
         })?;
 
-    let item = ProfitLossItem {
-        account_type: account_type.clone(),
-        account_id,
-        account_name,
-        amount,
-    };
-    match account_type.as_str()
- {
-    "revenue" => {
-        total_revenue += value;
-        revenue.push(item);
+        let item = ProfitLossItem {
+            account_type: account_type.clone(),
+            account_id,
+            account_name,
+            amount,
+        };
+        match account_type.as_str() {
+            "revenue" => {
+                total_revenue += value;
+                revenue.push(item);
+            }
+            "expense" => {
+                total_expenses += value;
+                expenses.push(item);
+            }
+            _ => {}
+        }
     }
-    "expense" => {
-        total_expenses += value;
-        expenses.push(item);
-    }
-    _ => {}
-  }
-
- }
 
     let net_profit = &total_revenue - &total_expenses;
 
@@ -687,9 +697,12 @@ pub async fn get_bal_sheet(
     let as_of = query.as_of;
     let token = bearer_token(&headers)?;
 
-     let user_id = super::sessions::find_session_user(&pool, token).await.map_err(|_| { StatusCode::IM_A_TEAPOT})?.ok_or(StatusCode::UNAUTHORIZED)?;
+    let user_id = super::sessions::find_session_user(&pool, token)
+        .await
+        .map_err(|_| StatusCode::IM_A_TEAPOT)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-     let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
+    let role = super::organizations::get_mem_role(&pool, organization_id, user_id)
         .await
         .map_err(|err| {
             eprintln!("Membership lookup failed: {err}");
@@ -699,11 +712,13 @@ pub async fn get_bal_sheet(
     if role.is_none() {
         return Err(StatusCode::FORBIDDEN);
     }
-    
-    let rows = super::journal_entries::get_bal_sheet(&pool, organization_id, as_of).await.map_err(|err| {
-        eprintln!("GAO! {err}");
-        StatusCode::IM_A_TEAPOT
-    })?;
+
+    let rows = super::journal_entries::get_bal_sheet(&pool, organization_id, as_of)
+        .await
+        .map_err(|err| {
+            eprintln!("GAO! {err}");
+            StatusCode::IM_A_TEAPOT
+        })?;
 
     let mut assets = Vec::new();
     let mut liabilities = Vec::new();
@@ -714,13 +729,12 @@ pub async fn get_bal_sheet(
     let mut total_equity = BigDecimal::from(0);
 
     for row in rows {
-        let amount = BigDecimal::from_str(&row.3)
-        .map_err(|_| StatusCode::IM_A_TEAPOT)?;
+        let amount = BigDecimal::from_str(&row.3).map_err(|_| StatusCode::IM_A_TEAPOT)?;
 
         let item = BalanceSheetItem {
             account_id: row.1,
             account_name: row.2,
-            amount: amount.to_string()
+            amount: amount.to_string(),
         };
 
         match row.0.as_str() {
@@ -740,21 +754,28 @@ pub async fn get_bal_sheet(
         }
     }
 
-    let current_earn_str = super::journal_entries::get_current_earnings(&pool, organization_id, as_of)
-    .await
-    .map_err(|err| {
-        eprintln!("Failed to fetch earnings: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let current_earn_str =
+        super::journal_entries::get_current_earnings(&pool, organization_id, as_of)
+            .await
+            .map_err(|err| {
+                eprintln!("Failed to fetch earnings: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
-    let current_earnings = BigDecimal::from_str(&current_earn_str)
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let current_earnings =
+        BigDecimal::from_str(&current_earn_str).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let balanced = 
-    total_assets == &total_liabilities + &total_equity + &current_earnings;
+    let balanced = total_assets == &total_liabilities + &total_equity + &current_earnings;
 
-    Ok(Json(BalSheetReport { as_of, assets, liabilities, equity, total_assets: total_assets.to_string(), total_liabilities: total_liabilities.to_string(), total_equity: total_equity.to_string(), current_earnings: current_earnings.to_string(), balanced }))
-
-    
-
+    Ok(Json(BalSheetReport {
+        as_of,
+        assets,
+        liabilities,
+        equity,
+        total_assets: total_assets.to_string(),
+        total_liabilities: total_liabilities.to_string(),
+        total_equity: total_equity.to_string(),
+        current_earnings: current_earnings.to_string(),
+        balanced,
+    }))
 }

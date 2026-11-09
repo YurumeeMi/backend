@@ -8,24 +8,22 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-
 fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
-    
     headers
-    .get(axum::http::header::COOKIE)
-    .and_then(|value| value.to_str().ok())
-    .and_then(|cookies| {
-        cookies.split(";").find.map(|cookie| {
-            let (name, value) = cookie.trim().split_once('=')
+        .get(axum::http::header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let (name, value) = cookie.trim().split_once('=')?;
 
-            if name == "session" && !value.is_empty() {
-                Some(value)
-            } else {
-                None
-            }
+                if name == "session" && !value.is_empty() {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
         })
-    })
-    .ok_or(StatusCode::UNAUTHORIZED)
+        .ok_or(StatusCode::UNAUTHORIZED)
 }
 
 #[derive(Deserialize)]
@@ -104,19 +102,16 @@ pub async fn login(
 
     let mut headers = axum::http::HeaderMap::new();
 
-    let cookie = format!(
-        "session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800"
-    );
+    let cookie = format!("session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800");
 
     headers.insert(
         axum::http::header::SET_COOKIE,
-        cookie.parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        cookie
+            .parse()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     );
 
-    Ok(( StatusCode::OK,
-         headers,
-        Json(LoginResponse {id})
-    ))
+    Ok((StatusCode::OK, headers, Json(LoginResponse { id })))
 }
 
 pub async fn me(
@@ -147,8 +142,8 @@ pub async fn logout(
     response_headers.insert(
         axum::http::header::SET_COOKIE,
         "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
-        .parse()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            .parse()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     );
 
     Ok((StatusCode::NO_CONTENT, response_headers))
@@ -366,6 +361,7 @@ pub struct CreateAccountReq {
     code: String,
     name: String,
     account_type: String,
+    opening_balance: String,
 }
 
 #[derive(Serialize)]
@@ -382,12 +378,17 @@ pub async fn create_account(
     let code = payload.code.trim();
     let name = payload.name.trim();
     let account_type = payload.account_type.trim();
+    let opening_balance = payload.opening_balance.trim();
 
     if code.is_empty()
         || code.len() > 32
         || name.is_empty()
         || name.len() > 120
         || !["asset", "liability", "equity", "revenue", "expense"].contains(&account_type)
+        || opening_balance.is_empty()
+        || opening_balance
+            .parse::<f64>()
+            .map_or(true, |v| !v.is_finite() || v < 0.0)
     {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -407,12 +408,19 @@ pub async fn create_account(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let id = super::accounts::create_account(&pool, organization_id, code, name, account_type)
-        .await
-        .map_err(|err| {
-            eprintln!("Account creation failed: {err}");
-            StatusCode::CONFLICT
-        })?;
+    let id = super::accounts::create_account(
+        &pool,
+        organization_id,
+        code,
+        name,
+        account_type,
+        opening_balance,
+    )
+    .await
+    .map_err(|err| {
+        eprintln!("Account creation failed: {err}");
+        StatusCode::CONFLICT
+    })?;
 
     Ok((StatusCode::CREATED, Json(CreateAccountRes { id })))
 }
@@ -423,6 +431,7 @@ pub struct AccountItem {
     code: String,
     name: String,
     account_type: String,
+    opening_balance: String,
     is_active: bool,
 }
 #[derive(Serialize)]
@@ -456,13 +465,16 @@ pub async fn list_acc(
 
     let accounts = rows
         .into_iter()
-        .map(|(id, code, name, account_type, is_active)| AccountItem {
-            id,
-            code,
-            name,
-            account_type,
-            is_active,
-        })
+        .map(
+            |(id, code, name, account_type, opening_balance, is_active)| AccountItem {
+                id,
+                code,
+                name,
+                account_type,
+                opening_balance,
+                is_active,
+            },
+        )
         .collect();
 
     Ok(Json(ListAccRes { accounts }))
@@ -488,7 +500,7 @@ pub async fn get_acc(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let (id, code, name, account_type, is_active) =
+    let (id, code, name, account_type, opening_balance, is_active) =
         super::accounts::get_account(&pool, organization_id, account_id)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -499,6 +511,7 @@ pub async fn get_acc(
         code,
         name,
         account_type,
+        opening_balance,
         is_active,
     }))
 }

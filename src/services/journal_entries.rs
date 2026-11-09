@@ -2,7 +2,6 @@ use chrono::NaiveDate;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-
 pub async fn create_journal_entry(
     pool: &PgPool,
     organization_id: Uuid,
@@ -228,7 +227,6 @@ pub async fn get_general_ledger(
     .await
 }
 
-
 pub async fn get_pf_and_loss(
     pool: &PgPool,
     organization_id: Uuid,
@@ -265,7 +263,6 @@ pub async fn get_pf_and_loss(
                                  AND a.account_type IN ('revenue', 'expense')
                            GROUP BY a.account_type, a.id, a.name
                            ORDER BY a.account_type, a.name"#,
-
     )
     .bind(organization_id)
     .bind(from)
@@ -307,7 +304,7 @@ pub async fn get_bal_sheet(
                 WHERE a.organization_id = $1
                       AND a.account_type IN ('asset', 'liability', 'equity')
                 GROUP BY a.account_type, a.id, a.name
-                ORDER BY a.account_type, a.name"#
+                ORDER BY a.account_type, a.name"#,
     )
     .bind(organization_id)
     .bind(as_of)
@@ -345,7 +342,7 @@ pub async fn get_current_earnings(
                              AND je.entry_date <= $2
                         WHERE a.organization_id = $1
                             AND a.account_type IN ('revenue', 'expense')
-                "#,               
+                "#,
     )
     .bind(organization_id)
     .bind(as_of)

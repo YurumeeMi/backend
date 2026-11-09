@@ -1,3 +1,4 @@
+mod api;
 mod app;
 mod ui;
 
@@ -13,7 +14,8 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use app::state::AppState;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
 
     let mut stdout = io::stdout();
@@ -23,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = AppState::new();
-
+    let api = api::client::ApiClient::new("http://127.0.0.1:3000")?;
     loop {
         terminal.draw(|frame| {
             ui::render(frame, &app);
@@ -31,9 +33,270 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if let Event::Key(key) = event::read()? {
             match key.code {
-                KeyCode::Char('q') => break,
-                KeyCode::Down => app.next_page(),
-                KeyCode::Up => app.pervious_page(),
+                KeyCode::Esc if app.organization_create_open => {
+                    app.organization_create_open = false;
+                    app.organization_name.clear();
+                    app.organization_error = None;
+                }
+
+                KeyCode::Char('n')
+                    if app.user_id.is_some()
+                        && app.selected_organization.is_none()
+                        && !app.organization_create_open =>
+                {
+                    app.organization_create_open = true;
+                    app.organization_name.clear();
+                    app.organization_error = None;
+                }
+
+                KeyCode::Up
+                    if app.user_id.is_some()
+                        && app.selected_organization.is_none()
+                        && !app.organization_create_open =>
+                {
+                    if app.organization_focus > 0 {
+                        app.organization_focus -= 1;
+                    }
+                }
+
+                KeyCode::Down
+                    if app.user_id.is_some()
+                        && app.selected_organization.is_none()
+                        && !app.organization_create_open =>
+                {
+                    if app.organization_focus + 1 < app.organizations.len() {
+                        app.organization_focus += 1;
+                    }
+                }
+
+                KeyCode::Enter
+                    if app.user_id.is_some()
+                        && app.selected_organization.is_none()
+                        && !app.organization_create_open =>
+                {
+                    if let Some(org) = app.organizations.get(app.organization_focus) {
+                        app.selected_organization = Some(org.id.clone());
+                    }
+                }
+
+                KeyCode::Char(c) if app.organization_create_open && !c.is_control() => {
+                    app.organization_name.push(c);
+                }
+
+                KeyCode::Backspace if app.organization_create_open => {
+                    app.organization_name.pop();
+                }
+                KeyCode::Char('q') if !app.account_form_open => {
+                    break;
+                }
+
+                KeyCode::Char('a')
+                    if app.selected_page == app::state::Page::Accounts
+                        && !app.account_form_open =>
+                {
+                    app.open_account_form();
+                }
+
+                KeyCode::Esc if app.account_form_open => {
+                    app.close_account_form();
+                }
+
+                KeyCode::Tab if app.account_form_open => {
+                    app.next_form_field();
+                }
+
+                KeyCode::BackTab if app.account_form_open => {
+                    app.previous_form_field();
+                }
+
+                KeyCode::Left if app.account_form_open && app.account_form_focus == 2 => {
+                    app.account_type = app.account_type.saturating_sub(1);
+                }
+
+                KeyCode::Right if app.account_form_open && app.account_form_focus == 2 => {
+                    app.account_type = (app.account_type + 1) % 5;
+                }
+
+                KeyCode::Down if !app.account_form_open => {
+                    app.next_page();
+                }
+
+                KeyCode::Up if !app.account_form_open => {
+                    app.pervious_page(); // glorified typo hahah
+                }
+                KeyCode::Enter if app.account_form_open && !app.is_loading => {
+                    let code = app.account_code.trim().to_string();
+                    let name = app.account_name.trim().to_string();
+                    let account_types = ["asset", "liability", "equity", "revenue", "expense"];
+
+                    if code.is_empty() || name.is_empty() {
+                        app.account_error = Some("Account code and name are required".into());
+                    } else if let Some(org_id) = app.selected_organization.clone() {
+                        app.is_loading = true;
+                        app.account_error = None;
+
+                        match api
+                            .create_account(
+                                &org_id,
+                                &code,
+                                &name,
+                                account_types[app.account_type],
+                                &app.opening_balance,
+                            )
+                            .await
+                        {
+                            Ok(_) => match api.get_accounts(&org_id).await {
+                                Ok(response) => {
+                                    app.accounts =
+                                        response.accounts.into_iter().map(Into::into).collect();
+                                    app.close_account_form();
+                                }
+                                Err(error) => app.account_error = Some(error.to_string()),
+                            },
+                            Err(error) => app.account_error = Some(error.to_string()),
+                        }
+
+                        app.is_loading = false;
+                    }
+                }
+
+                KeyCode::Char(c) if app.account_form_open && app.account_form_focus == 0 => {
+                    if c.is_ascii_digit() {
+                        app.account_code.push(c);
+                    }
+                }
+
+                KeyCode::Char(c) if app.account_form_open && app.account_form_focus == 1 => {
+                    if !c.is_control() {
+                        app.account_name.push(c);
+                    }
+                }
+
+                KeyCode::Backspace if app.account_form_open && app.account_form_focus == 0 => {
+                    app.account_code.pop();
+                }
+
+                KeyCode::Backspace if app.account_form_open && app.account_form_focus == 1 => {
+                    app.account_name.pop();
+                }
+                KeyCode::Char(c) if app.account_form_open && app.account_form_focus == 3 => {
+                    if c.is_ascii_digit() || (c == '.' && !app.opening_balance.contains('.')) {
+                        app.opening_balance.push(c);
+                    }
+                }
+
+                KeyCode::Backspace if app.account_form_open && app.account_form_focus == 3 => {
+                    app.opening_balance.pop();
+                }
+                KeyCode::Tab if app.user_id.is_none() => {
+                    app.auth_focus = (app.auth_focus + 1) % 2;
+                }
+
+                KeyCode::BackTab if app.user_id.is_none() => {
+                    app.auth_focus = (app.auth_focus + 1) % 2;
+                }
+
+                KeyCode::F(2) if app.user_id.is_none() => {
+                    app.auth_mode = match app.auth_mode {
+                        app::state::AuthMode::Login => app::state::AuthMode::Register,
+                        app::state::AuthMode::Register => app::state::AuthMode::Login,
+                    };
+                    app.auth_email.clear();
+                    app.auth_password.clear();
+                    app.auth_error = None;
+                }
+
+                KeyCode::Char(c) if app.user_id.is_none() && app.auth_focus == 0 => {
+                    if !c.is_control() {
+                        app.auth_email.push(c);
+                    }
+                }
+
+                KeyCode::Char(c) if app.user_id.is_none() && app.auth_focus == 1 => {
+                    if !c.is_control() {
+                        app.auth_password.push(c);
+                    }
+                }
+
+                KeyCode::Backspace if app.user_id.is_none() && app.auth_focus == 0 => {
+                    app.auth_email.pop();
+                }
+
+                KeyCode::Backspace if app.user_id.is_none() && app.auth_focus == 1 => {
+                    app.auth_password.pop();
+                }
+                KeyCode::Enter if app.user_id.is_none() && !app.is_loading => {
+                    let email = app.auth_email.trim().to_string();
+                    let password = app.auth_password.clone();
+
+                    if email.is_empty() || password.is_empty() {
+                        app.auth_error = Some("Email and password are required".into());
+                    } else {
+                        app.is_loading = true;
+                        app.auth_error = None;
+
+                        let result = match app.auth_mode {
+                            app::state::AuthMode::Login => api.login(&email, &password).await,
+
+                            app::state::AuthMode::Register => {
+                                match api.register(&email, &password).await {
+                                    Ok(_) => api.login(&email, &password).await,
+                                    Err(error) => Err(error),
+                                }
+                            }
+                        };
+
+                        app.is_loading = false;
+
+                        match result {
+                            Ok(user) => {
+                                app.user_id = Some(user.id);
+                                app.auth_password.clear();
+                                app.auth_error = None;
+
+                                match api.get_organizations().await {
+                                    Ok(response) => {
+                                        app.organizations = response.organizations;
+                                        app.organization_focus = 0;
+                                        app.organization_error = None;
+                                    }
+                                    Err(error) => {
+                                        app.organization_error = Some(error.to_string());
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                app.auth_error = Some(error.to_string());
+                                app.organization_error = Some(error.to_string());
+                            }
+                        }
+                    }
+                }
+                KeyCode::Enter if app.organization_create_open => {
+                    let name = app.organization_name.trim().to_string();
+
+                    if name.is_empty() {
+                        app.organization_error = Some("Organization name is required".into());
+                    } else {
+                        match api.create_organization(&name).await {
+                            Ok(created) => match api.get_organizations().await {
+                                Ok(response) => {
+                                    app.organizations = response.organizations;
+                                    app.selected_organization = Some(created.id);
+                                    app.organization_create_open = false;
+                                    app.organization_name.clear();
+                                    app.organization_error = None;
+                                }
+                                Err(error) => {
+                                    app.organization_error = Some(error.to_string());
+                                }
+                            },
+                            Err(error) => {
+                                app.organization_error = Some(error.to_string());
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }

@@ -1,11 +1,16 @@
 mod services;
 use crate::services::{
-    auth::{logout_all, register}, journal_entry_handlers::{
-        create_journal_entry, create_journal_line, get_general_ledger, get_pf_and_loss, get_trial_balance, list_journal_lines, post_journal_entry, get_bal_sheet
+    auth::{logout_all, register},
+    journal_entry_handlers::{
+        create_journal_entry, create_journal_line, get_bal_sheet, get_general_ledger,
+        get_pf_and_loss, get_trial_balance, list_journal_lines, post_journal_entry,
     },
 };
 use axum::{
-    Router, extract::DefaultBodyLimit, http::{Method, header}, routing::{get, post},
+    Router,
+    extract::DefaultBodyLimit,
+    http::{Method, header},
+    routing::{get, post},
 };
 use services::auth::{
     add_mem_org, change_pass, create_account, create_org, get_acc, get_org, list_acc, list_org,
@@ -36,7 +41,6 @@ async fn main() {
         .await
         .expect("DB MIGRATIONS FAILED");
 
-    
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(PeerIpKeyExtractor)
         .per_second(12)
@@ -66,12 +70,13 @@ async fn main() {
         .expect("Ey! I need a valid config");
 
     let cors = CorsLayer::new()
-    .allow_origin(["http://localhost:5173".parse().unwrap(),
-                 "http://127.0.0.1:5173".parse().unwrap(),
-                 ])
-                 .allow_credentials(true)
-                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+        .allow_origin([
+            "http://localhost:5173".parse().unwrap(),
+            "http://127.0.0.1:5173".parse().unwrap(),
+        ])
+        .allow_credentials(true)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     let app: Router<_> = Router::new()
         .route("/health", get(health))
@@ -106,9 +111,15 @@ async fn main() {
             "/organizations/{id}/journal_entries/{entry_id}/lines",
             post(create_journal_line).get(list_journal_lines),
         )
-        .route("/organizations/{id}/reports/balance-sheet", get(get_bal_sheet),)
+        .route(
+            "/organizations/{id}/reports/balance-sheet",
+            get(get_bal_sheet),
+        )
         .route("/organizations/{id}/accounts/{account_id}", get(get_acc))
-        .route("/organizations/{id}/reports/profit-loss", get(get_pf_and_loss),)
+        .route(
+            "/organizations/{id}/reports/profit-loss",
+            get(get_pf_and_loss),
+        )
         .route("/organizations/{id}", get(get_org))
         .route("/organizations/{id}/members", post(add_mem_org))
         .route("/auth/me", get(me))
