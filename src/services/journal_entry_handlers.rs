@@ -16,18 +16,22 @@ pub struct CrJnulEntReq {
     description: String,
     reference: Option<String>,
 }
-fn bearer_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
-    let value = headers
-        .get(axum::http::header::AUTHORIZATION)
+fn session_token(headers: &axum::http::HeaderMap) -> Result<&str, StatusCode> {
+    headers
+        .get(axum::http::header::COOKIE)
         .and_then(|value| value.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let (name, value) = cookie.trim().split_once('=')?;
 
-    let token = value
-        .strip_prefix("Bearer ")
-        .filter(|token| !token.is_empty())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    Ok(token)
+                if name == "session" && !value.is_empty() {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+        })
+        .ok_or(StatusCode::UNAUTHORIZED)
 }
 
 #[derive(Serialize)]
@@ -57,7 +61,7 @@ pub async fn create_journal_entry(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -149,7 +153,7 @@ pub async fn create_journal_line(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -234,7 +238,7 @@ pub async fn list_journal_lines(
     use sqlx::Row;
 
     // Authenticate the user.
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -330,7 +334,7 @@ pub async fn post_journal_entry(
     headers: axum::http::HeaderMap,
     Path((organization_id, entry_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, StatusCode> {
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -404,7 +408,7 @@ pub async fn get_general_ledger(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -490,7 +494,7 @@ pub async fn get_trial_balance(
     use sqlx::types::BigDecimal;
     use std::str::FromStr;
 
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -595,7 +599,7 @@ pub async fn get_pf_and_loss(
     if query.from > query.until {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await
@@ -695,7 +699,7 @@ pub async fn get_bal_sheet(
     Query(query): Query<BalSheetQuery>,
 ) -> Result<Json<BalSheetReport>, StatusCode> {
     let as_of = query.as_of;
-    let token = bearer_token(&headers)?;
+    let token = session_token(&headers)?;
 
     let user_id = super::sessions::find_session_user(&pool, token)
         .await

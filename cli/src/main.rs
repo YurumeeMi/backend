@@ -25,7 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = AppState::new();
-    let api = api::client::ApiClient::new("http://127.0.0.1:3000")?;
+    let api_url = std::env::var("API_URL")
+    .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+let api = api::client::ApiClient::new(&api_url)?;
     loop {
         terminal.draw(|frame| {
             ui::render(frame, &app);
