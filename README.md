@@ -20,3 +20,9 @@ down/up - to change the page
 
 due to lack of time the accounts portion was done in cli
 but in the backend it includes the basic ones mentioned in my sylabuss!
+
+
+
+HOW TO FIND THE REPO?
+docker push yumeer/sumiledger-backend:tagname
+docker push yumeer/sumiledger-cli:tagname
